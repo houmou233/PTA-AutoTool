@@ -139,7 +139,22 @@ return module.exports;})();
     var typewriter = { buffer: '', index: 0, active: false, editor: null };
     // 授权系统
     var AUTH_SERVER = 'http://47.104.250.117:3000';
-    var auth = { token: localStorage.getItem('pta_token') || '', valid: false, user: null };
+    var auth = { token: localStorage.getItem('pta_token') || '', valid: false, user: null, tier: 'free', usageCount: 0, quota: 0 };
+
+    // 生成浏览器指纹
+    function getFingerprint() {
+        try {
+            var canvas = document.createElement('canvas');
+            var ctx = canvas.getContext('2d');
+            ctx.textBaseline = 'top';
+            ctx.font = '14px Arial';
+            ctx.fillText('PTA-AutoTool_' + navigator.userAgent.length + screen.width + 'x' + screen.height + navigator.language, 2, 2);
+            var data = canvas.toDataURL();
+            var hash = 0;
+            for (var i = 0; i < data.length; i++) { hash = ((hash << 5) - hash) + data.charCodeAt(i); hash |= 0; }
+            return 'fp_' + Math.abs(hash).toString(36) + '_' + navigator.userAgent.length + '_' + screen.width;
+        } catch(e) { return 'fp_unknown_' + Date.now(); }
+    }
 
     function readJson(key, fallback) {
         try {
@@ -5347,7 +5362,7 @@ return module.exports; } catch (unavailable) { return null; } })();
             '</div>' +
             '<input id="pta-auth-user" type="text" placeholder="用户名" style="width:100%;padding:10px;margin-bottom:10px;border:none;border-radius:6px;background:#0f3460;color:#eee;font-size:14px;box-sizing:border-box">' +
             '<input id="pta-auth-pass" type="password" placeholder="密码" style="width:100%;padding:10px;margin-bottom:10px;border:none;border-radius:6px;background:#0f3460;color:#eee;font-size:14px;box-sizing:border-box">' +
-            '<input id="pta-auth-card" type="text" placeholder="卡密（注册用）" style="width:100%;padding:10px;margin-bottom:12px;border:none;border-radius:6px;background:#0f3460;color:#eee;font-size:14px;box-sizing:border-box;display:none">' +
+            '<input id="pta-auth-card" type="text" placeholder="卡密（选填，免费用户留空）" style="width:100%;padding:10px;margin-bottom:12px;border:none;border-radius:6px;background:#0f3460;color:#eee;font-size:14px;box-sizing:border-box;display:none">' +
             '<button id="pta-auth-btn" style="width:100%;padding:12px;border:none;border-radius:6px;background:#00d4ff;color:#000;font-size:15px;font-weight:600;cursor:pointer">登 录</button>' +
             '<div id="pta-auth-msg" style="text-align:center;font-size:13px;margin-top:10px;min-height:18px"></div>' +
             '</div>';
@@ -5372,16 +5387,16 @@ return module.exports; } catch (unavailable) { return null; } })();
         var p = document.getElementById('pta-auth-pass').value;
         var c = document.getElementById('pta-auth-card').value.trim();
         var msg = document.getElementById('pta-auth-msg');
-        if (!u || !p || !c) { msg.textContent = '请填写完整'; msg.style.color = '#ff6b6b'; return; }
+        if (!u || !p) { msg.textContent = '请填写用户名和密码'; msg.style.color = '#ff6b6b'; return; }
         msg.textContent = '注册中...'; msg.style.color = '#888';
         try {
-            var r = await fetch(AUTH_SERVER + '/api/register', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({username: u, password: p, card: c}) });
+            var r = await fetch(AUTH_SERVER + '/api/register', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({username: u, password: p, card: c, fingerprint: getFingerprint()}) });
             var d = await r.json();
             if (d.token) {
-                auth.token = d.token; auth.user = d.user; auth.valid = true;
+                auth.token = d.token; auth.user = d.user; auth.valid = true; auth.tier = d.user.tier || 'free';
                 localStorage.setItem('pta_token', d.token);
-                msg.textContent = '注册成功'; msg.style.color = '#51cf66';
-                setTimeout(function(){ document.getElementById('pta-auth-dialog').remove(); bootAfterAuth(); }, 500);
+                msg.textContent = d.user.tier === 'paid' ? '付费注册成功' : '免费注册成功（限10次）'; msg.style.color = '#51cf66';
+                setTimeout(function(){ document.getElementById('pta-auth-dialog').remove(); bootAfterAuth(); }, 800);
             } else { msg.textContent = d.error || '注册失败'; msg.style.color = '#ff6b6b'; }
         } catch(e) { msg.textContent = '服务器连接失败'; msg.style.color = '#ff6b6b'; }
     }
