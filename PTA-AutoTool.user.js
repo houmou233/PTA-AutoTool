@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PTA-AutoTool
 // @namespace    https://pintia.cn/
-// @version      2.1.0
+// @version      2.2.0
 // @description  不能在考试里面用，用了考不上大学后果自负
 // @author       houmou233
 // @match        https://pintia.cn/*
