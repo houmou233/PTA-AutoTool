@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PTA-AutoTool
 // @namespace    https://pintia.cn/
-// @version      2.6.2
+// @version      2.6.3
 // @description  不能在考试里面用，用了考不上大学后果自负
 // @author       houmou233
 // @match        https://pintia.cn/*
@@ -141,7 +141,7 @@ return module.exports;})();
     var typewriter = { buffer: '', index: 0, active: false, editor: null };
     // 授权系统
     var AUTH_SERVER = 'http://47.104.250.117:3000';
-    var SCRIPT_VERSION = '2.6.2';
+    var SCRIPT_VERSION = '2.6.3';
     var auth = { token: localStorage.getItem('pta_token') || '', valid: false, user: null, tier: 'free', usageCount: 0, quota: 0 };
 
     function isPaidUser() { return auth.tier === 'paid'; }
@@ -416,10 +416,28 @@ return module.exports;})();
 
     function editorEmpty(editor) { return getEditorDoc(editor).trim().length < 2; }
 
+    function isCodeTextarea(el) {
+        if (!el || el.tagName !== 'TEXTAREA') return false;
+        var rows = parseInt(el.getAttribute('rows') || '', 10);
+        var cls = String(el.className || '') + ' ' + String(el.id || '');
+        if (rows >= 4) return true;
+        return /code|editor|answer|program|source/i.test(cls);
+    }
+    function editorContainerOf(el) {
+        var cur = el;
+        while (cur && cur !== document.body) {
+            if (cur.classList && (cur.classList.contains('cm-editor') || cur.classList.contains('CodeMirror') || cur.classList.contains('monaco-editor'))) return cur;
+            cur = cur.parentElement;
+        }
+        return null;
+    }
+
     function editorForInput(input) {
+        var container = editorContainerOf(input);
+        if (container) return container;
         var current = input;
         while (current && current !== document.body) {
-            if (current.classList && current.classList.contains('cm-editor')) return current;
+            if (isCodeTextarea(current)) return current;
             current = current.parentElement;
         }
         return null;
@@ -5624,6 +5642,13 @@ return module.exports; } catch (unavailable) { return null; } })();
                 var b = slot(nearestProblem(editor));
                 if (b && b.editors.indexOf(editor) < 0) b.editors.push(editor);
             });
+            queryAll('textarea').forEach(function (ta) {
+                if (!isCodeTextarea(ta)) return;
+                if (editorContainerOf(ta)) return; // 外层编辑器容器已收录
+                if (ta.closest && ta.closest('#pta-root')) return;
+                var b = slot(nearestProblem(ta));
+                if (b && b.editors.indexOf(ta) < 0) b.editors.push(ta);
+            });
         } catch (e) {}
 
         bucket.forEach(function (b) {
@@ -5632,6 +5657,7 @@ return module.exports; } catch (unavailable) { return null; } })();
             var choices = b.options.map(function (o) { return { label: o.label || '', content: o.text }; });
             var answer = null, type = 'unknown';
             var code = b.editors.map(getEditorDoc).filter(function (s) { return s && s.trim(); }).join('\n\n');
+            var looksProgramming = /程序设计|编程题|编写程序|编写函数|程序填空|代码实现/i.test(content) && b.editors.length > 0;
             if (b.options.length) {
                 var multi = b.options.some(function (o) { return o.input && o.input.type === 'checkbox'; });
                 type = multi ? 'MULTIPLE_CHOICE_MORE_THAN_ONE_ANSWER' : 'MULTIPLE_CHOICE';
@@ -5640,6 +5666,9 @@ return module.exports; } catch (unavailable) { return null; } })();
             } else if (code) {
                 type = 'PROGRAMMING';
                 answer = code;
+            } else if (looksProgramming) {
+                type = 'PROGRAMMING';
+                answer = null;
             } else if (b.fillInputs.length) {
                 type = 'FILL_IN_THE_BLANK';
                 var vals = b.fillInputs.map(function (i) { return (i.value || '').trim(); }).filter(Boolean);
