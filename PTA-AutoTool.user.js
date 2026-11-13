@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PTA-AutoTool
 // @namespace    https://pintia.cn/
-// @version      2.6.0
+// @version      2.6.1
 // @description  不能在考试里面用，用了考不上大学后果自负
 // @author       houmou233
 // @match        https://pintia.cn/*
@@ -141,7 +141,7 @@ return module.exports;})();
     var typewriter = { buffer: '', index: 0, active: false, editor: null };
     // 授权系统
     var AUTH_SERVER = 'http://47.104.250.117:3000';
-    var SCRIPT_VERSION = '2.6.0';
+    var SCRIPT_VERSION = '2.6.1';
     var auth = { token: localStorage.getItem('pta_token') || '', valid: false, user: null, tier: 'free', usageCount: 0, quota: 0 };
 
     function isPaidUser() { return auth.tier === 'paid'; }
@@ -367,15 +367,27 @@ return module.exports;})();
     }
 
     function getEditorDoc(editor) {
-        var content = editor && editor.querySelector('.cm-content');
-        if (!content) return '';
-        try {
-            var tile = content.cmTile;
-            if (tile && tile.view && tile.view.state && tile.view.state.doc) {
-                return tile.view.state.doc.sliceString(0, tile.view.state.doc.length);
-            }
-        } catch (e) {}
-        return String(content.innerText != null ? content.innerText : (content.textContent || ''));
+        if (!editor) return '';
+        if (editor.tagName === 'TEXTAREA') return String(editor.value || '');
+        var content = editor.querySelector('.cm-content');
+        if (content) {
+            try {
+                var tile = content.cmTile;
+                if (tile && tile.view && tile.view.state && tile.view.state.doc) {
+                    return tile.view.state.doc.sliceString(0, tile.view.state.doc.length);
+                }
+            } catch (e) {}
+            var v = content._view || editor._view || editor._cmView;
+            if (v && v.state && v.state.doc) { try { return v.state.doc.sliceString(0, v.state.doc.length); } catch (e2) {} }
+            return String(content.innerText != null ? content.innerText : (content.textContent || ''));
+        }
+        var cm5 = editor.querySelector('.CodeMirror-code');
+        if (cm5) return String(cm5.innerText || cm5.textContent || '');
+        var lines = editor.querySelector('.monaco-editor .view-lines, .view-lines');
+        if (lines) return String(lines.innerText || lines.textContent || '');
+        var ta = editor.querySelector('textarea');
+        if (ta) return String(ta.value || '');
+        return String(editor.innerText || editor.textContent || '');
     }
 
     function editorEmpty(editor) { return getEditorDoc(editor).trim().length < 2; }
@@ -2133,7 +2145,6 @@ return module.exports; } catch (unavailable) { return null; } })();
                                 reveal(item, index);
                                 if (!current()) return;
                                 if (item.cacheAccepted) item.cacheAccepted(answer);
-                                reportUsage('solve'); auth.usageCount++;
                                 rememberPageWrite(item);
                                 markQuestionWritten(item.problem, item.allInputs || item.inputs, item.wasAnswered, item.progressToken);
                                 written++; applied.push(item);
@@ -4962,6 +4973,7 @@ return module.exports; } catch (unavailable) { return null; } })();
         if (!providerReady(state.provider)) { toast(PROVIDERS[state.provider].optionalKey ? '请先启动本地 OpenCode Free 代理' : '请先在设置中配置 API Key'); document.getElementById('pta-drawer').classList.add('open'); return; }
         if (!state.configs[state.provider].model || !state.configs[state.provider].models.length) { toast('请先获取并选择模型'); document.getElementById('pta-drawer').classList.add('open'); loadModels(state.provider, false); return; }
         if (!isPaidUser() && auth.quota > 0 && auth.usageCount >= auth.quota) { toast('免费次数已用完（' + auth.usageCount + '/' + auth.quota + '），请升级付费'); return; }
+        reportUsage('solve'); auth.usageCount++;
         aiCacheBypassRun = isSkipAnswered();
         state.runId = (state.runId || 0) + 1;
         var runId = state.runId;
@@ -5576,12 +5588,12 @@ return module.exports; } catch (unavailable) { return null; } })();
         } catch (e) {}
         // 编程 / 函数题编辑器
         try {
-            queryAll('.cm-editor').forEach(function (editor) {
+            queryAll('.cm-editor, .CodeMirror, .monaco-editor').forEach(function (editor) {
                 var parentClass = String(editor.parentElement && editor.parentElement.className || '');
                 if (/readonly/i.test(parentClass)) return;
                 if (editor.closest && editor.closest('#pta-root')) return;
                 var b = slot(nearestProblem(editor));
-                if (b) b.editors.push(editor);
+                if (b && b.editors.indexOf(editor) < 0) b.editors.push(editor);
             });
         } catch (e) {}
 
@@ -5590,19 +5602,22 @@ return module.exports; } catch (unavailable) { return null; } })();
             if (!content || content.trim().length < 3) return;
             var choices = b.options.map(function (o) { return { label: o.label || '', content: o.text }; });
             var answer = null, type = 'unknown';
+            var code = b.editors.map(getEditorDoc).filter(function (s) { return s && s.trim(); }).join('\n\n');
             if (b.options.length) {
                 var multi = b.options.some(function (o) { return o.input && o.input.type === 'checkbox'; });
                 type = multi ? 'MULTIPLE_CHOICE_MORE_THAN_ONE_ANSWER' : 'MULTIPLE_CHOICE';
                 var picked = b.options.filter(function (o) { return o.input && o.input.checked; }).map(function (o) { return o.label || (o.text.match(/^\s*([A-F]|T|F)/i) || [])[1] || ''; });
                 answer = picked.length ? picked.join('') : null;
+            } else if (code) {
+                type = 'PROGRAMMING';
+                answer = code;
             } else if (b.fillInputs.length) {
                 type = 'FILL_IN_THE_BLANK';
                 var vals = b.fillInputs.map(function (i) { return (i.value || '').trim(); }).filter(Boolean);
                 answer = vals.length ? vals.join(' | ') : null;
             } else if (b.editors.length) {
                 type = 'PROGRAMMING';
-                var code = b.editors.map(getEditorDoc).filter(function (s) { return s && s.trim(); }).join('\n\n');
-                answer = code || null;
+                answer = null;
             }
             push({ title: content.trim().slice(0, 80), content: content, choices: choices, answer: answer, type: type });
         });
