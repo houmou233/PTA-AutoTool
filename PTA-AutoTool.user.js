@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PTA-AutoTool
 // @namespace    https://pintia.cn/
-// @version      2.6.4
+// @version      2.6.5
 // @description  不能在考试里面用，用了考不上大学后果自负
 // @author       houmou233
 // @match        https://pintia.cn/*
@@ -141,7 +141,7 @@ return module.exports;})();
     var typewriter = { buffer: '', index: 0, active: false, editor: null };
     // 授权系统
     var AUTH_SERVER = 'http://47.104.250.117:3000';
-    var SCRIPT_VERSION = '2.6.4';
+    var SCRIPT_VERSION = '2.6.5';
     var auth = { token: localStorage.getItem('pta_token') || '', valid: false, user: null, tier: 'free', usageCount: 0, quota: 0 };
 
     function isPaidUser() { return auth.tier === 'paid'; }
@@ -180,6 +180,21 @@ return module.exports;})();
         if (!el) return;
         if (!auth.valid) { el.textContent = ''; return; }
         el.textContent = isPaidUser() ? '付费用户 · 无限制' : ('剩余 ' + Math.max(0, (auth.quota - auth.usageCount)) + '/' + auth.quota + ' 次');
+    }
+    var tokenBucket = { prompt: 0, completion: 0 };
+    function accumulateUsage(usage) {
+        if (!usage) return;
+        var pt = usage.prompt_tokens || usage.input_tokens || 0;
+        var ct = usage.completion_tokens || usage.output_tokens || 0;
+        if (!ct && usage.total_tokens) ct = Math.max(0, usage.total_tokens - pt);
+        tokenBucket.prompt += pt; tokenBucket.completion += ct;
+    }
+    function reportTokens() {
+        if (!auth.token) { tokenBucket = { prompt: 0, completion: 0 }; return; }
+        if (!tokenBucket.prompt && !tokenBucket.completion) return;
+        var payload = { prompt: tokenBucket.prompt, completion: tokenBucket.completion };
+        tokenBucket = { prompt: 0, completion: 0 };
+        serverRequest('POST', '/api/tokens', payload).catch(function () {});
     }
 
     // 生成浏览器指纹
@@ -1074,6 +1089,7 @@ return module.exports;})();
                         fail(new Error(data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.reasoning_content ? 'AI 返回为空：本次只返回了推理内容，建议在设置中调大 Max Token 或降低思考强度' : 'AI 返回为空：请检查模型是否支持当前请求'));
                         return;
                     }
+                    accumulateUsage(data.usage);
                     succeed(String(content).trim());
                 },
                 onerror: function () { fail(new Error('AI 请求失败：网络请求失败，请检查网络、脚本连接权限或 API Key')); },
@@ -5026,7 +5042,7 @@ return module.exports; } catch (unavailable) { return null; } })();
         autoSolve().catch(function (error) { if (state.runId === runId) { log(error.message || String(error), 'warning'); toast('任务中断'); } }).finally(function () { if (state.runId === runId) stopSolve(!state.pageErrors); });
     }
 
-    function stopSolve(completed) { state.running = false; state.runId = (state.runId || 0) + 1; if (activeSolveController) activeSolveController.abort(); activeSolveController = null; var shell = document.getElementById('pta-shell'); if (shell) shell.classList.remove('running'); var root = document.getElementById('pta-root'); if (root) root.classList.remove('running'); var button = document.getElementById('pta-start'); if (button) { button.textContent = '开始解题'; button.classList.remove('stop'); } setQuestionProgress(completed ? '已完成' : '已停止', 1, 1); setStatus(completed ? '已完成' : '已停止', completed ? '评分与答题流程已结束' : '任务已暂停', completed ? 'ok' : ''); }
+    function stopSolve(completed) { reportTokens(); state.running = false; state.runId = (state.runId || 0) + 1; if (activeSolveController) activeSolveController.abort(); activeSolveController = null; var shell = document.getElementById('pta-shell'); if (shell) shell.classList.remove('running'); var root = document.getElementById('pta-root'); if (root) root.classList.remove('running'); var button = document.getElementById('pta-start'); if (button) { button.textContent = '开始解题'; button.classList.remove('stop'); } setQuestionProgress(completed ? '已完成' : '已停止', 1, 1); setStatus(completed ? '已完成' : '已停止', completed ? '评分与答题流程已结束' : '任务已暂停', completed ? 'ok' : ''); }
 
     // Explicit opt-in passive API diagnostics. No headers, credentials, request
     // bodies, arbitrary URLs or response strings are ever retained/exported.
